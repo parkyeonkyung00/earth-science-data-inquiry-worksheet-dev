@@ -77,6 +77,7 @@ test("예시·사전 지식 안내와 확장 역할 선언 및 보라색 테마�
   assert.match(stylesheet, /--accent: #7043A7/);
   assert.match(stylesheet, /\.role-declaration/);
   assert.match(stylesheet, /\.guide/);
+  assert.match(stylesheet, /\.btn\[hidden\]\s*\{\s*display:\s*none\s*;/);
 });
 
 test("교과별 대표 예시와 비계별 진입·전환 기준을 제공한다", () => {
