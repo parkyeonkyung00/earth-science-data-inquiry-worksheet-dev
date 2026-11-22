@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { COMMON_CHECKS, PREFIX, SCAFFOLDS, SECTIONS, questionChoices } from "../js/constants.js";
+import { COMMON_CHECKS, PREFIX, SCAFFOLD_GUIDANCE, SCAFFOLDS, SECTIONS, SUBJECT_EXAMPLES, questionChoices } from "../js/constants.js";
 import { parseCode, verificationStatus } from "../js/student.js";
 import { CONFIG } from "../js/config.js";
 
 const readJson = async name => JSON.parse(await readFile(new URL(`../data/${name}.json`, import.meta.url), "utf8"));
 const [original, extra, standards] = await Promise.all(["activities", "activities-extra", "standards"].map(readJson));
 const activities = [...original, ...extra];
+const [studentSource, stylesheet] = await Promise.all([
+  readFile(new URL("../js/student.js", import.meta.url), "utf8"),
+  readFile(new URL("../css/style.css", import.meta.url), "utf8"),
+]);
+const teacherSource = await readFile(new URL("../js/teacher.js", import.meta.url), "utf8");
 
 test("기존 21개와 추가 42개 활동이 전체 62개 성취기준을 포함한다", () => {
   assert.equal(original.length, 21);
@@ -48,7 +53,53 @@ test("논문 구조는 8개 단계와 별도 정리 단계, 공통 검증 5개�
   assert.equal(SECTIONS[3].n, "§2.5");
   assert.equal(SECTIONS[8].key, "sum");
   assert.equal(COMMON_CHECKS.length, 5);
+  assert.ok(COMMON_CHECKS.slice(0, 2).every(item => item.e));
   for (const row of SCAFFOLDS) for (const v of ["A", "B", "C"]) assert.ok(row[v]);
+});
+
+test("예측은 단일 선택으로 보존하고 성찰 이동은 검증 통과 조건을 공유한다", () => {
+  assert.match(studentSource, /setAnswer\(key, value\)/);
+  assert.match(studentSource, /state\.step === SECTION_INDEX\.s4/);
+  assert.match(studentSource, /index === SECTION_INDEX\.s6 && !canProceedToReflection\(\)/);
+  assert.match(studentSource, /status === "pass" \|\| revisionRunCount\(\) >= MAX_REVISION_RUNS/);
+});
+
+test("예시·사전 지식 안내와 확장 역할 선언 및 보라색 테마가 제공된다", () => {
+  for (const content of ["예시 페이지", "배경 지식", "사전 지식 페이지", "role_record", "role_privacy", "decl5"]) {
+    assert.ok(studentSource.includes(content), content);
+  }
+  assert.match(studentSource, /단계별 프롬프트 작성 예시/);
+  assert.match(studentSource, /첨부 파일/);
+  assert.match(stylesheet, /--accent: #7043A7/);
+  assert.match(stylesheet, /\.role-declaration/);
+  assert.match(stylesheet, /\.guide/);
+});
+
+test("교과별 대표 예시와 비계별 진입·전환 기준을 제공한다", () => {
+  assert.equal(SUBJECT_EXAMPLES.length, 3);
+  for (const example of SUBJECT_EXAMPLES) assert.ok(activities.some(activity => activity.id === example.activityId));
+  assert.equal(SCAFFOLD_GUIDANCE.length, 3);
+  assert.match(teacherSource, /SCAFFOLD_GUIDANCE\.map/);
+  for (const item of SCAFFOLD_GUIDANCE) {
+    assert.ok(item.entry.length > 20);
+    assert.ok(item.transition.length > 20);
+  }
+});
+
+test("출처와 기간 검증을 먼저 제시하고 반복 재실행을 두 회로 제한한다", () => {
+  assert.match(studentSource, /출처와 기간/);
+  assert.match(studentSource, /MAX_REVISION_RUNS = 2/);
+  assert.match(studentSource, /수정 회차는 최대/);
+  assert.match(studentSource, /cappedWithIssues/);
+  assert.match(studentSource, /status === "pass" \|\| \(status === "revise" && revisionRunCount\(\) >= MAX_REVISION_RUNS\)/);
+});
+
+test("시각적 강조 스타일과 구체적인 공통 오류 사례가 있다", () => {
+  assert.ok(COMMON_CHECKS.every(item => item.t && item.h && item.e));
+  assert.match(stylesheet, /--accent: #7043A7/);
+  assert.match(stylesheet, /\.role-declaration/);
+  assert.match(stylesheet, /\.source-first/);
+  assert.match(stylesheet, /\.ver-example/);
 });
 
 test("빙하 코어와 기별 지층·화석은 정확한 성취기준에 각각 연결한다", () => {
@@ -78,10 +129,10 @@ test("검증 기록·예측 비교·모든 판정과 근거가 없으면 통과�
   }
 });
 
-test("문제·모름 또는 예측 불일치면 수정 경로로 보낸다", () => {
+test("확인된 오류나 판단 보류는 수정하고 예측 불일치만으로 오류라 하지 않는다", () => {
   for (const version of ["A", "B"]) {
     for (const judgment of ["bad", "unk"]) assert.equal(verificationStatus(version, { ...complete, chk_c0: judgment }, checks), "revise");
-    assert.equal(verificationStatus(version, { ...complete, prediction_match: "differ" }, checks), "revise");
+    assert.equal(verificationStatus(version, { ...complete, prediction_match: "differ" }, checks), "pass");
   }
 });
 

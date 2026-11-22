@@ -1,4 +1,4 @@
-import { PREFIX, SCAFFOLDS, SUBJ, SUBJ_ORDER, UNITS, VERSIONS } from "./constants.js";
+import { PREFIX, SCAFFOLD_GUIDANCE, SCAFFOLDS, SUBJ, SUBJ_ORDER, UNITS, VERSIONS } from "./constants.js";
 import { CONFIG } from "./config.js";
 
 const escapeHtml = value => String(value == null ? "" : value).replace(/[&<>"']/g, character => ({
@@ -210,7 +210,17 @@ export function renderTeacher(app, data, state, actions) {
           <td><label class="check"><input type="checkbox" data-reviewed="${index}" ${review[index] ? "checked" : ""}>확인</label></td>
         </tr>`).join("")}</tbody>
       </table></div>
-      <p class="note">검증 흐름: §4에서 결과와 예측을 비교하고 모든 검증 판정을 기록해야 합니다. 문제·모름·예측 불일치가 있으면 §5 → §3 → §4로 재검증합니다. 예측과 다르다는 이유만으로 AI 결과가 틀렸다고 단정하지 않습니다. 모두 확인되고 예측과 일치하면 §6으로 이동합니다.</p>
+      <div class="scaffold-guidance">
+        <h2>비계 선택과 전환 기준</h2>
+        <p class="small muted">A·B·C는 학생의 고정 능력이나 성취수준이 아니라, 현재 과제에서 필요한 지원의 양입니다. 요소별로 비계를 줄이거나 다시 제공할 수 있습니다.</p>
+        <div class="scaffold-guidance-grid">${SCAFFOLD_GUIDANCE.map(item => `
+          <article class="guide">
+            <h3>${item.version} · ${escapeHtml(item.title)}</h3>
+            <p><b>선택할 때</b> · ${escapeHtml(item.entry)}</p>
+            <p><b>전환 기준</b> · ${escapeHtml(item.transition)}</p>
+          </article>`).join("")}</div>
+      </div>
+      <p class="note">검증 흐름: §2·§4에서 출처와 기간을 먼저 확인하고 모든 판정·근거를 기록합니다. 확인된 오류나 판단 보류가 있으면 최대 2회 §5 → §3 → §4로 재검증합니다. 예측과 결과가 다르다는 사실만으로는 수정 분기로 가지 않습니다. 검증 기준에서 오류가 없으면 예측 일치 여부와 관계없이 §6으로 이동하고, 재검증 한도에 도달하면 남은 문제를 성찰에 기록합니다.</p>
       <p class="small muted">외부 설문의 동의 안내와 문항을 확인한 후 자발적으로 참여하세요. 웹앱의 기록은 설문으로 자동 전달되지 않습니다. AI 오류 실험 결과는 이 검토 화면에 제시하지 않습니다.</p>
       ${CONFIG.surveyUrl ? `<a class="btn primary" href="${escapeHtml(CONFIG.surveyUrl)}" target="_blank" rel="noopener noreferrer">검토 후 설문 참여하기 ↗</a>` : '<p class="note">설문 링크가 아직 설정되지 않았습니다.</p>'}
     </section>

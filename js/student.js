@@ -4,6 +4,7 @@ import {
   P_CARDS,
   Q_TYPES,
   SECTIONS,
+  SUBJECT_EXAMPLES,
   STARTERS,
   SUBJ,
   SUBJ_ORDER,
@@ -19,6 +20,8 @@ const escapeHtml = value => String(value == null ? "" : value).replace(/[&<>"']/
   '"': "&quot;",
   "'": "&#39;",
 }[character]));
+
+const MAX_REVISION_RUNS = 2;
 
 export function parseCode(input, activities) {
   const normalized = String(input || "").trim().toLowerCase().replace(/^#/, "").replace(/[\s_]/g, "");
@@ -44,13 +47,14 @@ export function verificationStatus(version, answers, checks) {
   if (version === "C" && [0, 1, 2].some(i => !has(`cc_${i}`))) return "incomplete";
   if (!checks.length || checks.some(item => !["ok", "bad", "unk"].includes(answers[`chk_${item.id}`])
     || !has(`chkn_${item.id}`))) return "incomplete";
-  return answers.prediction_match === "differ" || checks.some(item => answers[`chk_${item.id}`] !== "ok")
-    ? "revise" : "pass";
+  return checks.some(item => answers[`chk_${item.id}`] !== "ok") ? "revise" : "pass";
 }
 
 function classCode(id, version) {
   return `${id.replace("-", "").toUpperCase()}-${version}`;
 }
+
+const SECTION_INDEX = Object.fromEntries(SECTIONS.map((section, index) => [section.key, index]));
 
 function answerKey(state) {
   return `evc:${state.act}:${state.version}`;
@@ -112,6 +116,15 @@ export function renderStudent(app, data, state, actions) {
       state.step = state.previewStep;
       state.previewStep = null;
     }
+  }
+
+  function revisionRunCount() {
+    return Array.isArray(state.ans._verificationHistory) ? state.ans._verificationHistory.length : 0;
+  }
+
+  function canProceedToReflection() {
+    const status = verificationStatus(state.version, state.ans, checkList());
+    return status === "pass" || (status === "revise" && revisionRunCount() >= MAX_REVISION_RUNS);
   }
 
   function save() {
@@ -210,6 +223,11 @@ export function renderStudent(app, data, state, actions) {
   function renderWork() {
     loadCurrentAnswer();
     state.step = Math.max(0, Math.min(SECTIONS.length - 1, Number(state.step) || 0));
+    if (state.step === SECTION_INDEX.s6 && !canProceedToReflection()) {
+      state.step = SECTION_INDEX.s4;
+      state.ans._step = state.step;
+      save();
+    }
     const activity = data.activities.find(item => item.id === state.act);
     if (!activity) {
       state.act = null;
@@ -244,12 +262,29 @@ export function renderStudent(app, data, state, actions) {
         <p class="small muted">${escapeHtml(data.standards[activity.code])}</p>
         ${activity.code === "12지구01-03" ? '<p class="small muted">“위상 영상”은 고시 원문 표기입니다. 탐구에는 관련 성취수준에 따라 위성 영상을 사용합니다.</p>' : ""}
       </div>`;
+    const backgroundPage = `
+      <details class="guide background-guide">
+        <summary>활동 배경 지식 · 핵심 개념과 자료 읽기</summary>
+        <div class="guide-content stack">
+          <p><b>성취기준</b> · ${escapeHtml(data.standards[activity.code])}</p>
+          <p><b>교과·활동 연결</b> · ${escapeHtml(activity.textbook)}</p>
+          <p><b>자료</b> · ${escapeHtml(activity.data.name)} — ${escapeHtml(activity.data.org)}</p>
+          <p class="small">${escapeHtml(activity.data.how)}</p>
+          <div>
+            <b>핵심 변수와 단위</b>
+            <ul class="plain">${activity.vars.map(variable => `<li>${escapeHtml(variable.n)} · ${escapeHtml(variable.u)}${variable.r ? ` · 일반 범위: ${escapeHtml(variable.r)}` : ""}</li>`).join("")}</ul>
+          </div>
+          <p><b>먼저 생각할 질문</b> · ${escapeHtml(activity.questions[0])}</p>
+          <p><b>자료의 한계·주의점</b> · ${escapeHtml(activity.pitfalls[0])}</p>
+        </div>
+      </details>`;
 
     app.innerHTML = `
       <div class="work">
         ${rail}
         <div class="sheet">
           ${header}
+          ${backgroundPage}
           <div id="sec"></div>
           <p class="err" id="navError" role="alert" hidden></p>
           <div class="navrow">
@@ -265,15 +300,16 @@ export function renderStudent(app, data, state, actions) {
     });
     document.getElementById("prev").addEventListener("click", () => go(state.step - 1));
     document.getElementById("next").addEventListener("click", () => {
-      if (state.step === 5) {
+      if (state.step === SECTION_INDEX.s4) {
         const status = verificationStatus(state.version, state.ans, checkList());
         if (status === "incomplete") {
           showNavigationError("§2.5의 예측(A는 근거 포함), AI 결과, 예측과의 비교, 모든 검증 항목의 판정과 근거를 기록하세요. C 버전은 자신의 기준 3개도 필요합니다.");
           return;
         }
-        go(status === "pass" ? 7 : 6);
-      } else if (state.step === 6) {
-        rerunRevision();
+        go(status === "pass" || revisionRunCount() >= MAX_REVISION_RUNS ? SECTION_INDEX.s6 : SECTION_INDEX.s5);
+      } else if (state.step === SECTION_INDEX.s5) {
+        if (revisionRunCount() >= MAX_REVISION_RUNS) go(SECTION_INDEX.s6);
+        else rerunRevision();
       } else go(state.step + 1);
     });
     document.getElementById("leave").addEventListener("click", () => {
@@ -285,8 +321,11 @@ export function renderStudent(app, data, state, actions) {
     });
     document.getElementById("prev").disabled = state.step === 0;
     document.getElementById("next").hidden = state.step === SECTIONS.length - 1;
-    if (state.step === 5) document.getElementById("next").textContent = "검증 결과에 따라 이동";
-    if (state.step === 6) document.getElementById("next").textContent = "수정 프롬프트로 §3 재실행";
+    if (state.step === SECTION_INDEX.s4) document.getElementById("next").textContent = "검증 결과에 따라 이동";
+    if (state.step === SECTION_INDEX.s5) {
+      document.getElementById("next").textContent = revisionRunCount() >= MAX_REVISION_RUNS
+        ? "성찰로 이동 (재검증 횟수 제한)" : "수정 프롬프트로 §3 재실행";
+    }
     renderSection();
   }
 
@@ -297,7 +336,11 @@ export function renderStudent(app, data, state, actions) {
   }
 
   function rerunRevision() {
-    const index = Math.max(1, Number(answer(state, "rounds_n")) || 1) - 1;
+    if (revisionRunCount() >= MAX_REVISION_RUNS) {
+      showNavigationError(`재검증은 최대 ${MAX_REVISION_RUNS}회까지입니다. 남은 문제를 성찰에 기록하세요.`);
+      return;
+    }
+    const index = Math.min(MAX_REVISION_RUNS, Math.max(1, Number(answer(state, "rounds_n")) || 1)) - 1;
     if (!String(answer(state, `r${index}_problem`)).trim() || !String(answer(state, `r${index}_prompt`)).trim()) {
       showNavigationError("마지막 회차의 발견한 문제와 수정 프롬프트를 기록한 뒤 재실행하세요.");
       return;
@@ -313,13 +356,13 @@ export function renderStudent(app, data, state, actions) {
     delete state.ans.ai_result;
     delete state.ans.prediction_match;
     delete state.ans._predictionAtVerification;
-    go(4);
+    go(SECTION_INDEX.s3);
   }
 
   function go(index) {
     if (index < 0 || index >= SECTIONS.length) return;
-    if (index === 7 && verificationStatus(state.version, state.ans, checkList()) !== "pass") {
-      showNavigationError("§4의 모든 검증에 근거를 기록하세요. 문제·모름·예측 불일치가 남으면 §5에서 수정·재검증한 뒤 성찰로 이동합니다. 미완성 기록도 ‘정리’에서 저장할 수 있습니다.");
+    if (index === SECTION_INDEX.s6 && !canProceedToReflection()) {
+      showNavigationError("§4의 모든 검증 기준을 기록하세요. 확인된 문제나 판단이 어려운 항목이 있으면 §5에서 수정·재검증합니다. 예측과 다르다는 이유만으로 오류가 되지는 않습니다. 미완성 기록은 ‘정리’에서 저장할 수 있습니다.");
       return;
     }
     state.step = index;
@@ -340,8 +383,8 @@ export function renderStudent(app, data, state, actions) {
     const has = field => String(answer(state, field)).trim() !== "";
     switch (key) {
       case "s0": return has("pre_trust") && (state.version === "A"
-        ? isChecked(state, "decl1") && isChecked(state, "decl2") && isChecked(state, "decl3")
-        : state.version === "B" ? has("role_self") && has("role_ai") && has("role_check") : has("decl_own"));
+        ? ["decl1", "decl2", "decl3", "decl4", "decl5"].every(key => isChecked(state, key))
+        : state.version === "B" ? ["role_self", "role_ai", "role_check", "role_record", "role_privacy"].every(has) : has("decl_own"));
       case "s1": return has("question");
       case "s2": return state.version === "C" ? has("context_free") : has("source") && has("period") && has("place");
       case "s25": return hasPrediction(state.version, state.ans);
@@ -409,11 +452,10 @@ export function renderStudent(app, data, state, actions) {
       const [key, value] = button.dataset.pick.split("|");
       button.setAttribute("aria-pressed", String(answer(state, key)) === value);
       button.addEventListener("click", () => {
-        state.ans[key] = String(answer(state, key)) === value ? "" : value;
         root.querySelectorAll(`[data-pick^="${key}|"]`).forEach(option => {
-          option.setAttribute("aria-pressed", String(answer(state, key)) === option.dataset.pick.split("|")[1]);
+          option.setAttribute("aria-pressed", value === option.dataset.pick.split("|")[1]);
         });
-        setAnswer(key, state.ans[key]);
+        setAnswer(key, value);
       });
     });
   }
@@ -422,9 +464,15 @@ export function renderStudent(app, data, state, actions) {
 
   function checkList() {
     const activity = data.activities.find(item => item.id === state.act);
-    const checks = state.version === "C" ? [] : COMMON_CHECKS.map((item, index) => ({ id: `c${index}`, t: item.t, h: item.h, kind: "공통" }));
+    const checks = COMMON_CHECKS
+      .slice(0, state.version === "C" ? 2 : COMMON_CHECKS.length)
+      .map((item, index) => ({
+        id: `c${index}`, t: item.t, h: item.h, e: item.e, kind: "공통",
+      }));
     activity.checks.forEach((item, index) => {
-      if (state.version === "A" || (state.version === "B" && index < 2)) checks.push({ id: `a${index}`, t: item.t, h: item.h, kind: "이 활동" });
+      if (state.version === "A" || (state.version === "B" && index < 2)) {
+        checks.push({ id: `a${index}`, t: item.t, h: item.h, kind: "이 활동" });
+      }
     });
     if (state.version === "C") {
       [0, 1, 2].forEach(index => {
@@ -447,7 +495,9 @@ export function renderStudent(app, data, state, actions) {
             `).join("")}
           </div>
         </div>
-        ${state.version !== "C" && item.h ? `<p class="vhint">${escapeHtml(state.version === "A" ? item.h : item.h.split(/[。.!?]/)[0])}</p>` : ""}
+        ${item.h ? `<p class="vhint"><b>${item.kind === "공통" ? "쉽게 확인하기" : "이 활동에서 확인할 점"}</b> · ${escapeHtml(state.version === "A" || item.kind === "공통" ? item.h : item.h.split(/[。.!?]/)[0])}</p>`
+          : `<p class="vhint"><b>쉽게 확인하기</b> · 원자료의 열 이름·단위·조건을 대조하고, 아래 활동별 오류 사례에서 해당하는 점이 있는지 살펴보세요.</p>`}
+        ${item.e ? `<p class="ver-example"><b>오류 예시</b> · ${escapeHtml(item.e)}</p>` : ""}
         <input type="text" data-k="chkn_${item.id}" placeholder="근거나 메모" aria-label="메모">
       </div>`;
   }
@@ -527,12 +577,20 @@ export function renderStudent(app, data, state, actions) {
     lines.push(`수업 코드 ${classCode(activity.id, state.version)} (${VERSIONS[state.version].name})`);
     addLine("이름", answer(state, "name"));
     addLine("AI 도구", answer(state, "tool"));
-    lines.push(`검증 상태: ${verificationStatus(state.version, state.ans, checkList()) === "pass" ? "모든 판정·근거 기록 및 예측 일치 (정확성의 자동 보증 아님)" : "미완료 또는 재검토 필요"}`);
+    const status = verificationStatus(state.version, state.ans, checkList());
+    lines.push(`검증 상태: ${status === "pass"
+      ? "기준별 확인 완료 (예측 불일치만으로 오류로 판단하지 않음)"
+      : status === "revise" ? "오류 확인 또는 판정 보류 — 수정·추가 확인 필요" : "미완료"}`);
+    if (revisionRunCount() >= MAX_REVISION_RUNS && status === "revise") {
+      lines.push(`재검증 횟수 제한: 최대 ${MAX_REVISION_RUNS}회 실행 후 남은 문제를 성찰에 기록`);
+    }
     lines.push("", "§0 역할 선언");
     addLine("역할 선언", [
       isChecked(state, "decl1") && "탐구자 선언",
       isChecked(state, "decl2") && "결과는 가설",
       isChecked(state, "decl3") && "정직한 기록",
+      isChecked(state, "decl4") && "근거 검증",
+      isChecked(state, "decl5") && "개인정보 보호",
     ].filter(Boolean).join(", "));
     addLine("나만의 약속", answer(state, "decl_own"));
     addLine("사전 AI 신뢰도(1~5)", answer(state, "pre_trust"));
@@ -578,7 +636,7 @@ export function renderStudent(app, data, state, actions) {
       if (checked || note) lines.push(`- [${labels[checked] || "미확인"}] ${item.t}${note ? ` / ${note}` : ""}`);
     });
     lines.push("", "§5 수정·반복");
-    const roundCount = Math.max(1, Number(answer(state, "rounds_n")) || 1);
+    const roundCount = Math.min(MAX_REVISION_RUNS, Math.max(1, Number(answer(state, "rounds_n")) || 1));
     for (let index = 0; index < roundCount; index++) {
       const problem = answer(state, `r${index}_problem`);
       const prompt = answer(state, `r${index}_prompt`);
@@ -598,7 +656,9 @@ export function renderStudent(app, data, state, actions) {
     addLine("동의하지 않는 부분", answer(state, "disagree"));
     addLine("다음에 바꿀 점", answer(state, "next"));
     addLine("성취수준 자기 점검", answer(state, "self_level"));
-    addLine("역할 선언", state.version === "B" ? `나: ${answer(state, "role_self")} / AI: ${answer(state, "role_ai")} / 검증: ${answer(state, "role_check")}` : answer(state, "decl_own"));
+    addLine("역할 선언", state.version === "B"
+      ? `나: ${answer(state, "role_self")} / AI: ${answer(state, "role_ai")} / 검증: ${answer(state, "role_check")} / 기록: ${answer(state, "role_record")} / 개인정보: ${answer(state, "role_privacy")}`
+      : answer(state, "decl_own"));
     addLine("자유 데이터 맥락", answer(state, "context_free"));
     addLine("자유 예측", answer(state, "prediction_free"));
     addLine("자유 성찰", answer(state, "reflection_free"));
@@ -627,20 +687,31 @@ export function renderStudent(app, data, state, actions) {
             </select>
           </div>
         </div>
-        <div class="field">
+        <div class="field role-field">
           <span class="flabel">역할 선언 · ${VERSIONS[state.version].name}</span>
+          <div class="role-declaration stack">
+            <div class="role-heading">
+              <span class="label">나의 탐구 원칙</span>
+              <b>탐구와 최종 판단은 나, AI는 보조 도구</b>
+              <p>AI의 답은 검증 전까지 가설입니다. 자료·근거를 확인하고, 사용 과정은 정직하게 기록하며, 개인정보는 입력하지 않습니다.</p>
+            </div>
           ${state.version === "A" ? `
           <label class="check"><input type="checkbox" data-k="decl1"> 나는 탐구 질문과 결론을 스스로 정하는 탐구자이다.</label>
-          <label class="check"><input type="checkbox" data-k="decl2"> AI가 만든 그래프와 계산은 내가 검증하기 전까지 '가설'로 본다.</label>
-          <label class="check"><input type="checkbox" data-k="decl3"> 내가 사용한 데이터의 출처와 AI 사용 과정을 정직하게 기록한다.</label>
+          <label class="check"><input type="checkbox" data-k="decl2"> AI는 자료 분석을 돕지만, 결론과 선택을 대신하지 않는다.</label>
+          <label class="check"><input type="checkbox" data-k="decl3"> 그래프와 계산은 원자료·단위·과학 개념으로 확인한다.</label>
+          <label class="check"><input type="checkbox" data-k="decl4"> 자료 출처와 사용한 AI·프롬프트를 정직하게 기록한다.</label>
+          <label class="check"><input type="checkbox" data-k="decl5"> 개인정보나 민감한 정보를 AI 도구에 입력하지 않는다.</label>
           ` : state.version === "B" ? `
-          <p>나는 ___을 결정하고, AI는 ___을 돕는다. AI 결과는 ___으로 확인한다.</p>
+          <p>빈칸을 채워 나와 AI의 역할, 검증·기록 원칙을 정하세요.</p>
           ${inputField("role_self", "내가 결정할 것", "")}
           ${inputField("role_ai", "AI가 도울 것", "")}
-          ${inputField("role_check", "결과를 검증할 방법", "")}
+          ${inputField("role_check", "결과를 검증할 방법", "예: 원자료의 값·단위와 교과 개념을 대조")}
+          ${inputField("role_record", "출처와 AI 사용을 기록하는 방법", "예: 자료 주소, 도구 이름, 보낸 프롬프트 기록")}
+          ${inputField("role_privacy", "입력하지 않을 정보", "예: 이름, 연락처, 민감한 개인정보")}
           ` : `
-          <p class="note">역할 선언 기준: 탐구의 주체, AI의 역할과 한계, 결과를 검증할 책임, 출처·사용 기록의 정직성이 드러나야 합니다.</p>
-          ${textareaField("decl_own", "나의 역할 선언", "", "", 3)}`}
+          <p class="note">선언에 담을 기준: 내가 내릴 결정, AI에 맡길 보조 작업과 한계, 검증 근거, 출처·사용 기록, 개인정보 보호.</p>
+          ${textareaField("decl_own", "나의 역할 선언", "다섯 기준을 참고해 나만의 문장으로 선언하세요.", "", 5)}`}
+          </div>
         </div>
         ${scaleField("pre_trust", "AI가 만든 그래프나 계산 결과를 그대로 믿어도 된다고 생각하나요?", "전혀 아니다", "매우 그렇다")}
         <p class="small muted">비계 버전 A·B·C는 지원의 양입니다. 교육과정의 성취수준 A~E나 학생의 등급을 뜻하지 않습니다.</p>`);
@@ -676,6 +747,30 @@ export function renderStudent(app, data, state, actions) {
             <li>답을 찾으면 해당 성취기준의 과학 개념을 설명하는 데 도움이 된다.</li>
           </ul></div>`;
       }
+      body += `
+        <details class="guide">
+          <summary>예시 페이지 · 이 활동의 질문과 분석 방향</summary>
+          <div class="guide-content stack">
+            <p class="small muted">예시는 그대로 제출하는 답이 아니라, 자료에 맞는 질문을 만드는 출발점입니다.</p>
+            <ul class="plain">${activity.questions.map(question => `<li>${escapeHtml(question)}</li>`).join("")}</ul>
+            <p><b>살펴볼 분석 방향</b> · ${escapeHtml(activity.tasks[0])}</p>
+            <p><b>예측해 볼 내용</b> · ${escapeHtml(activity.predict)}</p>
+          </div>
+        </details>
+        <details class="guide">
+          <summary>교과별 대표 탐구 예시 · 통합과학과 지구과학</summary>
+          <div class="guide-content stack">
+            ${SUBJECT_EXAMPLES.map(example => {
+              const sample = data.activities.find(item => item.id === example.activityId);
+              return sample ? `<div class="subject-example">
+                <b>${escapeHtml(example.subject)}</b>
+                <span>${escapeHtml(sample.title)}</span>
+                <span class="small muted">${escapeHtml(sample.questions[0])}</span>
+              </div>` : "";
+            }).join("")}
+            <p class="small muted">대표 예시는 질문·자료·분석 방법을 참고하기 위한 것이며, 실제 활동에서는 현재 선택한 활동의 자료와 조건을 사용하세요.</p>
+          </div>
+        </details>`;
       body += textareaField("q_why", "이 질문을 고른 이유", "어떤 과학 개념과 연결되나요?", "", 2);
       html = sectionWrap(1, "데이터로 답할 수 있는 질문을 정합니다.", body);
     } else if (sectionKey === "s2") {
@@ -705,11 +800,31 @@ export function renderStudent(app, data, state, actions) {
         variables = "";
       }
       html = sectionWrap(2, "AI는 내가 알려 준 만큼만 자료를 이해합니다. 자료의 출처, 범위, 단위를 정확히 적으세요.", `
+        <div class="source-first">
+          <b>먼저 확인 · 출처와 기간</b>
+          <ol class="plain">
+            <li>다운로드할 기관과 파일이 <b>${escapeHtml(dataset.org)} · ${escapeHtml(dataset.name)}</b>인지 확인합니다.</li>
+            <li>원자료의 첫 날짜·마지막 날짜, 지역 코드와 관측 간격을 확인한 뒤 아래에 기록합니다.</li>
+            <li>실험·모형 자료라면 측정 조건과 제공자를 기록하고, 실제 파일의 값과 AI 결과를 대조합니다.</li>
+          </ol>
+        </div>
         <div class="datacard">
           <span class="label">이 활동의 데이터</span><b>${escapeHtml(dataset.name)}</b>
           <span class="small">${escapeHtml(dataset.org)}${dataset.url ? ` · <a href="${escapeHtml(dataset.url)}" target="_blank" rel="noopener">${escapeHtml(dataset.url)}</a>` : ""}</span>
           ${state.version === "A" ? `<span class="small muted">${escapeHtml(dataset.how)}</span>` : ""}
         </div>
+        <details class="guide">
+          <summary>사전 지식 페이지 · 자료를 보기 전에 확인하기</summary>
+          <div class="guide-content">
+            <ul class="plain">
+              <li><b>자료의 성격:</b> 관측·실험·문헌·모형 중 무엇이며, 누가 언제 어떤 조건에서 만들었나요?</li>
+              <li><b>변수와 단위:</b> 각 열이 무엇을 뜻하고 단위와 관측 간격은 무엇인가요?</li>
+              <li><b>그래프 읽기:</b> 가로·세로축과 범위를 확인하고, 값의 변화와 자료의 빈칸을 구분하세요.</li>
+              <li><b>과학적 해석:</b> 함께 변하는 두 값만으로 원인과 결과를 단정하지 말고, 배운 개념과 다른 설명도 검토하세요.</li>
+              <li><b>자료의 한계:</b> 출처·기간·지역·측정 조건이 결론에 미치는 영향을 기록하고, 모르는 값은 지어내거나 결측값을 임의로 0으로 바꾸지 마세요.</li>
+            </ul>
+          </div>
+        </details>
         ${state.version === "C" ? `
         <div class="note"><b>데이터 맥락 자가 완성 체크리스트</b>
           ${["출처·파일과 접근 경로", "기간과 지역·대상", "변수·단위·관측 간격", "값 범위와 결측·이상값", "측정 조건과 자료의 한계"].map((item, index) => `<label class="check"><input type="checkbox" data-k="context_check_${index}">${item}</label>`).join("")}
@@ -788,6 +903,31 @@ export function renderStudent(app, data, state, actions) {
           ${scaleField("p_self", "내 프롬프트는 위 기준을 얼마나 만족하나요?", "거의 못 함", "모두 만족")}
           <div class="copyrow"><button class="btn primary" type="button" id="pCopy">프롬프트 복사</button></div>`;
       }
+      const samplePrompt = [
+        "[역할] 자료를 분석하는 조수로서 계산과 그래프를 돕고, 결론은 제가 내리도록 근거를 설명해 주세요.",
+        `[자료] ${activity.data.name} (${activity.data.org}); 기간: [내가 확인한 기간]; 지역·대상: [내가 확인한 지역·대상]`,
+        `[탐구 질문] ${activity.questions[0]}`,
+        `[핵심 작업] ${activity.tasks[0]}`,
+        `[출력] ${activity.chart}`,
+        `[검증] ${activity.checks[0].t} 원자료에 없는 값은 만들지 말고, 결측·가정·처리 방법을 먼저 밝혀 주세요.`,
+        "[첨부 파일] 위 출처에서 받은 실제 자료 파일을 함께 첨부합니다. 파일을 읽지 못하면 분석을 추측하지 말고 알려 주세요.",
+      ].join("\n");
+      body += `
+        <details class="guide prompt-guide">
+          <summary>단계별 프롬프트 작성 예시 · 핵심 요소와 선택 요소</summary>
+          <div class="guide-content stack">
+            <p><b>핵심 요소</b> · 탐구 질문, 자료 출처·기간·지역·변수와 단위, 요청할 작업, 원하는 표·그래프, 원자료와 대조할 검증 기준.</p>
+            <p><b>선택 요소</b> · 추가 비교, 보조 축, 코드 주석, 출력 표의 세부 형식. 필요한 것만 더하고 자료에 없는 조건은 만들지 않습니다.</p>
+            <ol class="plain">
+              <li>§2에서 실제 자료의 출처·기간·지역을 확인합니다.</li>
+              <li>현재 활동의 예시에서 대괄호 내용을 내 자료와 탐구 질문으로 바꿉니다.</li>
+              <li>필요한 작업과 검증 요청을 선택하고, 선택 요소는 과제에 필요할 때만 추가합니다.</li>
+              <li>실제 CSV·표 파일을 AI 도구에 직접 첨부하고, 파일을 읽었는지 먼저 확인합니다.</li>
+              <li>AI 결과를 원자료·단위·과학 개념과 대조합니다. 예시는 문장 구조만 참고하고 답이나 수치를 복사하지 않습니다.</li>
+            </ol>
+            <pre class="prompt-out">${escapeHtml(samplePrompt)}</pre>
+          </div>
+        </details>`;
       html = sectionWrap(4, "AI에게 보낼 프롬프트를 만듭니다. 데이터 파일(CSV 등)은 AI 도구에 함께 첨부하세요.", body);
     } else if (sectionKey === "s4") {
       const checks = checkList();
@@ -809,21 +949,28 @@ export function renderStudent(app, data, state, actions) {
         body += `
           <div class="field">
             <span class="flabel">나만의 검증 기준 세우기</span>
-            <span class="hint">이 자료에서 '틀린 결과'를 알아챌 수 있는 기준을 세 가지 이상 스스로 정하세요.</span>
+            <span class="hint">출처와 기간 확인 뒤, 이 자료에서 잘못된 결과를 알아챌 기준을 세 가지 이상 스스로 정하세요.</span>
             ${[0, 1, 2].map(index => `<input type="text" data-k="cc_${index}" placeholder="검증 기준 ${index + 1}" aria-label="검증 기준 ${index + 1}">`).join("")}
           </div>`;
       }
-      body += `<div class="field"><span class="flabel">검증 체크</span><div class="tally" id="tally"></div></div>
+      body += `<div class="field"><span class="flabel">검증 체크</span>
+          <p class="hint">각 항목을 쉬운 확인 기준과 오류 예시에 따라 판정하세요. 예측과 다른 결과만으로 오류라고 판단하지 말고 원자료에서 오류가 확인되었는지 살핍니다.</p>
+          <div class="tally" id="tally"></div>
+        </div>
+        <details class="guide">
+          <summary>이 활동에서 실제로 주의할 오류 사례</summary>
+          <div class="guide-content"><ul class="plain">${activity.pitfalls.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+        </details>
         <div class="stack" id="vlist">${checks.map(verificationRow).join("")}</div>`;
-      html = sectionWrap(5, "AI 결과를 하나씩 확인합니다. 하나라도 '문제 있음'이면 §5에서 고쳐 다시 요청합니다.", body);
+      html = sectionWrap(5, "자료 출처·기간을 먼저 확인한 뒤, 검증 기준에서 실제 오류가 발견될 때만 수정·재실행합니다. 예측과 결과가 다르더라도 그 자체는 오류가 아닙니다.", body);
     } else if (sectionKey === "s5") {
-      const roundCount = Math.max(1, Number(answer(state, "rounds_n")) || 1);
-      const problems = checkList().filter(item => answer(state, `chk_${item.id}`) === "bad");
+      const roundCount = Math.min(MAX_REVISION_RUNS, Math.max(1, Number(answer(state, "rounds_n")) || 1));
+      const problems = checkList().filter(item => ["bad", "unk"].includes(answer(state, `chk_${item.id}`)));
       let body = problems.length
-        ? `<div class="note"><b>§4에서 '문제 있음'으로 표시한 항목</b><ul class="plain">
-            ${problems.map(item => `<li>${escapeHtml(item.t)}${answer(state, `chkn_${item.id}`) ? ` — <span class="muted">${escapeHtml(answer(state, `chkn_${item.id}`))}</span>` : ""}</li>`).join("")}
+        ? `<div class="note"><b>§4에서 문제 또는 확인 어려움으로 표시한 항목</b><ul class="plain">
+            ${problems.map(item => `<li>${answer(state, `chk_${item.id}`) === "unk" ? "확인 필요 · " : ""}${escapeHtml(item.t)}${answer(state, `chkn_${item.id}`) ? ` — <span class="muted">${escapeHtml(answer(state, `chkn_${item.id}`))}</span>` : ""}</li>`).join("")}
           </ul></div>`
-        : '<p class="note">§4에서 \'문제 있음\'으로 표시한 항목이 없습니다. 그래도 더 알고 싶은 점이나 개선할 점이 있으면 기록하세요.</p>';
+        : '<p class="note">§4 검증 기준에서 확인된 오류가 없습니다. 예측과 결과가 달랐다면 어느 쪽이 자료와 더 잘 맞는지 성찰에 기록하세요.</p>';
       for (let index = 0; index < roundCount; index++) {
         body += `
           <div class="round">
@@ -837,10 +984,17 @@ export function renderStudent(app, data, state, actions) {
             ${state.version !== "C" ? textareaField(`r${index}_change`, "재실행 후 결과 변화", state.version === "A" ? "재실행과 재검증 후 돌아와 해결 여부와 새 문제를 기록하세요." : "", "", 2) : ""}
           </div>`;
       }
-      body += '<div><button class="btn" type="button" id="addRound">수정 회차 추가</button></div>';
-      html = sectionWrap(6, "근거를 검토해 프롬프트를 수정하고 §3에서 재실행한 뒤 §4에서 다시 검증합니다. 예측이 잘못되었다면 이유를 기록하고 §2.5에서 수정하세요. 일치를 만들기 위해 관측값을 바꾸면 안 됩니다. 재실행 전 예측·결과·판정은 정리에 이력으로 남습니다.", body);
+      body += roundCount < MAX_REVISION_RUNS
+        ? '<div><button class="btn" type="button" id="addRound">수정 회차 추가 (최대 2회)</button></div>'
+        : `<p class="note">수정 회차는 최대 ${MAX_REVISION_RUNS}회입니다. 재검증 후에도 문제가 남으면 추가 실행을 반복하지 말고 성찰에 남은 문제와 한계를 기록하세요.</p>`;
+      if (revisionRunCount() >= MAX_REVISION_RUNS) {
+        body += `<div class="note"><b>재검증 횟수 제한</b> · ${MAX_REVISION_RUNS}회 재실행했습니다. 남은 항목은 성찰에서 명시하고 §6으로 이동하세요.</div>`;
+      }
+      html = sectionWrap(6, "검증 기준에서 확인된 오류를 고쳐 최대 2회 재실행합니다. 예측 자체가 잘못되었다면 이유를 §2.5에 남기되, 예측과 맞추려고 관측값을 바꾸지 마세요. 재실행 전 결과와 판정은 정리에 이력으로 남습니다.", body);
     } else if (sectionKey === "s6") {
       const level = data.levels[activity.code];
+      const unresolvedChecks = checkList().filter(item => ["bad", "unk"].includes(answer(state, `chk_${item.id}`)));
+      const cappedWithIssues = revisionRunCount() >= MAX_REVISION_RUNS && unresolvedChecks.length;
       let body = state.version === "C" ? `
         ${scaleField("post_trust", "탐구 후 AI 결과를 그대로 믿어도 된다고 생각하나요?", "전혀 아니다", "매우 그렇다")}
         <p class="small muted" id="trustCmp"></p>
@@ -856,6 +1010,13 @@ export function renderStudent(app, data, state, actions) {
         ${textareaField("errors", "AI 결과에서 찾은 오류와 찾아낸 방법", "어떤 단서로 오류를 알아챘나요? 오류가 없었다면 어떻게 확인했나요?", "", 3)}
         ${textareaField("disagree", "AI 설명 중 동의하지 않거나 더 확인이 필요한 부분", "", "", 2)}
         ${textareaField("next", "다음에 AI로 데이터를 탐구할 때 바꿀 점", "", "", 2)}`;
+      if (cappedWithIssues) {
+        body = `<div class="error reflection-warning" role="note">
+        <b>최대 재검증 횟수에 도달했습니다.</b>
+        <p>아래 항목은 해결되지 않았거나 확인이 더 필요합니다. 오류를 숨기지 말고 결론의 한계와 추가로 필요한 확인을 성찰에 기록하세요.</p>
+        <ul class="plain">${unresolvedChecks.map(item => `<li>${escapeHtml(item.t)}${answer(state, `chkn_${item.id}`) ? ` — ${escapeHtml(answer(state, `chkn_${item.id}`))}` : ""}</li>`).join("")}</ul>
+        </div>${body}`;
+      }
       if (level && state.version !== "C") {
         body += `
           <div class="field">
@@ -869,7 +1030,7 @@ export function renderStudent(app, data, state, actions) {
             </div>
           </div>`;
       }
-      html = sectionWrap(7, "탐구 과정을 되돌아봅니다. 특히 AI를 얼마나, 어떻게 믿었는지 점검하세요.", body);
+      html = sectionWrap(SECTION_INDEX.s6, "탐구 과정을 되돌아봅니다. 특히 AI를 얼마나, 어떻게 믿었는지 점검하세요.", body);
     } else if (sectionKey === "sum") {
       html = sectionWrap(8, "모든 단계의 기록을 한 번에 모았습니다. 복사해서 한글, 구글 클래스룸, 학습지 제출란에 붙여 넣으세요.", `
         <div class="copyrow">
@@ -1015,8 +1176,8 @@ export function renderStudent(app, data, state, actions) {
     }
 
     if (sectionKey === "s5") {
-      document.getElementById("addRound").addEventListener("click", () => {
-        state.ans.rounds_n = Math.max(1, Number(answer(state, "rounds_n")) || 1) + 1;
+      document.getElementById("addRound")?.addEventListener("click", () => {
+        state.ans.rounds_n = Math.min(MAX_REVISION_RUNS, Math.max(1, Number(answer(state, "rounds_n")) || 1) + 1);
         save();
         renderSection();
       });
