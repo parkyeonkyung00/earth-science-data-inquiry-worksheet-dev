@@ -279,6 +279,7 @@ export function renderStudent(app, data, state, actions) {
           <p class="err" id="navError" role="alert" hidden></p>
           <div class="navrow">
             <button class="btn" type="button" id="prev">이전 단계</button>
+            <button class="btn" type="button" id="reflectionShortcut" ${state.step === SECTION_INDEX.s6 || state.step === SECTIONS.length - 1 ? "hidden" : ""}>성찰로 이동</button>
             <button class="btn primary" type="button" id="next">다음 단계</button>
           </div>
         </div>
@@ -289,6 +290,7 @@ export function renderStudent(app, data, state, actions) {
       button.addEventListener("click", () => go(Number(button.dataset.step)));
     });
     document.getElementById("prev").addEventListener("click", () => go(state.step - 1));
+    document.getElementById("reflectionShortcut").addEventListener("click", () => go(SECTION_INDEX.s6));
     document.getElementById("next").addEventListener("click", () => {
       if (state.step === SECTION_INDEX.s4) {
         const status = verificationStatus(state.version, state.ans, checkList());

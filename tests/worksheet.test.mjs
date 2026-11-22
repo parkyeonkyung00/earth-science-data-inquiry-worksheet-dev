@@ -61,6 +61,8 @@ test("예측은 단일 선택으로 보존하고 성찰 단계는 검증 미완�
   assert.match(studentSource, /setAnswer\(key, value\)/);
   assert.match(studentSource, /state\.step === SECTION_INDEX\.s4/);
   assert.match(studentSource, /button\.addEventListener\("click", \(\) => go\(Number\(button\.dataset\.step\)\)\)/);
+  assert.match(studentSource, /id="reflectionShortcut"/);
+  assert.match(studentSource, /getElementById\("reflectionShortcut"\)\.addEventListener\("click", \(\) => go\(SECTION_INDEX\.s6\)\)/);
   assert.doesNotMatch(studentSource, /canProceedToReflection/);
   assert.match(studentSource, /검증 기록이 아직 완료되지 않았습니다/);
   assert.match(studentSource, /status === "pass" \|\| revisionRunCount\(\) >= MAX_REVISION_RUNS/);
