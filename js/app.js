@@ -1,7 +1,7 @@
 import { SUBJ } from "./constants.js";
 import { CONFIG } from "./config.js";
 import { renderTeacher } from "./teacher.js";
-import { parseCode, renderStudent } from "./student.js";
+import { parseCode, renderStudent } from "./student.js?v=reflection-shortcut-2";
 
 const app = document.getElementById("app");
 const modeTeacher = document.getElementById("modeT");
