@@ -57,10 +57,12 @@ test("논문 구조는 8개 단계와 별도 정리 단계, 공통 검증 5개�
   for (const row of SCAFFOLDS) for (const v of ["A", "B", "C"]) assert.ok(row[v]);
 });
 
-test("예측은 단일 선택으로 보존하고 성찰 이동은 검증 통과 조건을 공유한다", () => {
+test("예측은 단일 선택으로 보존하고 성찰 단계는 검증 미완료 상태에서도 열 수 있다", () => {
   assert.match(studentSource, /setAnswer\(key, value\)/);
   assert.match(studentSource, /state\.step === SECTION_INDEX\.s4/);
-  assert.match(studentSource, /index === SECTION_INDEX\.s6 && !canProceedToReflection\(\)/);
+  assert.match(studentSource, /button\.addEventListener\("click", \(\) => go\(Number\(button\.dataset\.step\)\)\)/);
+  assert.doesNotMatch(studentSource, /canProceedToReflection/);
+  assert.match(studentSource, /검증 기록이 아직 완료되지 않았습니다/);
   assert.match(studentSource, /status === "pass" \|\| revisionRunCount\(\) >= MAX_REVISION_RUNS/);
 });
 
@@ -91,7 +93,7 @@ test("출처와 기간 검증을 먼저 제시하고 반복 재실행을 두 회
   assert.match(studentSource, /MAX_REVISION_RUNS = 2/);
   assert.match(studentSource, /수정 회차는 최대/);
   assert.match(studentSource, /cappedWithIssues/);
-  assert.match(studentSource, /status === "pass" \|\| \(status === "revise" && revisionRunCount\(\) >= MAX_REVISION_RUNS\)/);
+  assert.match(studentSource, /status === "pass" \|\| revisionRunCount\(\) >= MAX_REVISION_RUNS/);
 });
 
 test("시각적 강조 스타일과 구체적인 공통 오류 사례가 있다", () => {

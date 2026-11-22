@@ -122,11 +122,6 @@ export function renderStudent(app, data, state, actions) {
     return Array.isArray(state.ans._verificationHistory) ? state.ans._verificationHistory.length : 0;
   }
 
-  function canProceedToReflection() {
-    const status = verificationStatus(state.version, state.ans, checkList());
-    return status === "pass" || (status === "revise" && revisionRunCount() >= MAX_REVISION_RUNS);
-  }
-
   function save() {
     window.clearTimeout(saveTimer);
     const key = state.act ? answerKey(state) : null;
@@ -223,11 +218,6 @@ export function renderStudent(app, data, state, actions) {
   function renderWork() {
     loadCurrentAnswer();
     state.step = Math.max(0, Math.min(SECTIONS.length - 1, Number(state.step) || 0));
-    if (state.step === SECTION_INDEX.s6 && !canProceedToReflection()) {
-      state.step = SECTION_INDEX.s4;
-      state.ans._step = state.step;
-      save();
-    }
     const activity = data.activities.find(item => item.id === state.act);
     if (!activity) {
       state.act = null;
@@ -361,10 +351,6 @@ export function renderStudent(app, data, state, actions) {
 
   function go(index) {
     if (index < 0 || index >= SECTIONS.length) return;
-    if (index === SECTION_INDEX.s6 && !canProceedToReflection()) {
-      showNavigationError("§4의 모든 검증 기준을 기록하세요. 확인된 문제나 판단이 어려운 항목이 있으면 §5에서 수정·재검증합니다. 예측과 다르다는 이유만으로 오류가 되지는 않습니다. 미완성 기록은 ‘정리’에서 저장할 수 있습니다.");
-      return;
-    }
     state.step = index;
     state.ans._step = index;
     save();
@@ -995,6 +981,7 @@ export function renderStudent(app, data, state, actions) {
       const level = data.levels[activity.code];
       const unresolvedChecks = checkList().filter(item => ["bad", "unk"].includes(answer(state, `chk_${item.id}`)));
       const cappedWithIssues = revisionRunCount() >= MAX_REVISION_RUNS && unresolvedChecks.length;
+      const reflectionStatus = verificationStatus(state.version, state.ans, checkList());
       let body = state.version === "C" ? `
         ${scaleField("post_trust", "탐구 후 AI 결과를 그대로 믿어도 된다고 생각하나요?", "전혀 아니다", "매우 그렇다")}
         <p class="small muted" id="trustCmp"></p>
@@ -1015,6 +1002,11 @@ export function renderStudent(app, data, state, actions) {
         <b>최대 재검증 횟수에 도달했습니다.</b>
         <p>아래 항목은 해결되지 않았거나 확인이 더 필요합니다. 오류를 숨기지 말고 결론의 한계와 추가로 필요한 확인을 성찰에 기록하세요.</p>
         <ul class="plain">${unresolvedChecks.map(item => `<li>${escapeHtml(item.t)}${answer(state, `chkn_${item.id}`) ? ` — ${escapeHtml(answer(state, `chkn_${item.id}`))}` : ""}</li>`).join("")}</ul>
+        </div>${body}`;
+      } else if (reflectionStatus !== "pass") {
+        body = `<div class="note reflection-warning" role="note">
+          <b>${reflectionStatus === "incomplete" ? "검증 기록이 아직 완료되지 않았습니다." : "검증에서 확인할 항목이 남아 있습니다."}</b>
+          <p>성찰은 작성할 수 있지만, 이 상태는 검증 완료를 뜻하지 않습니다. 남은 점검 사항을 숨기지 말고 성찰에 기록하세요.</p>
         </div>${body}`;
       }
       if (level && state.version !== "C") {
